@@ -213,3 +213,5 @@ outputs/
 *.avi
 *.pyc
 .ipynb_checkpoints/
+yolov8n.pt
+*.pt
