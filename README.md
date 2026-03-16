@@ -75,10 +75,10 @@ When training completes the results table above will be updated with the final e
 ## Sample Outputs
 
 ### Annotated Detection and Tracking
-![Sample Frame](outputs/sample_frame.png)
+![Sample Frame](assets/sample_frame.png)
 
 ### Track Trajectories
-![Trajectories](outputs/trajectories.png)
+![Trajectories](assets/trajectories.png)
 
 ### Training Curves (Day 2)
 ![Training](outputs/training/drone_finetune/results.png)
