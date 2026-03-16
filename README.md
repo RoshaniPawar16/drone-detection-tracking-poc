@@ -40,8 +40,7 @@ Annotated Output Video   (Track ID + confidence overlaid on each frame)
 | Model                   | Precision                                      | Recall                                         | F1  | Avg FPS |
 |-------------------------|------------------------------------------------|------------------------------------------------|-----|---------|
 | YOLOv8n (pretrained)    | TBD — ground truth annotations required        | TBD — ground truth annotations required        | TBD | **35.49**   |
-| YOLOv8s (fine-tuned)    | TBD — ground truth annotations required        | TBD — ground truth annotations required        | TBD | TBD     |
-| YOLOv8m (fine-tuned)    | TBD — ground truth annotations required        | TBD — ground truth annotations required        | TBD | TBD     |
+| YOLOv8n fine-tuned (VisDrone, in progress) | TBD — ground truth annotations required | TBD — ground truth annotations required | TBD | TBD |
 
 > FPS measured on Apple M-series (MPS) running YOLOv8n at 640×360 over 9184 frames. Precision and Recall require labelled ground-truth annotations — to be produced by `evaluate.py` once a UAS dataset is curated.
 
@@ -66,7 +65,7 @@ Training is running across ten epochs on Apple MPS (the M2's GPU). mAP50 measure
 
 Each validation epoch takes considerably longer than the training pass itself. This is a known bottleneck when running dense object detection on Apple MPS: the non-maximum suppression step — which filters overlapping detections and keeps only the best bounding box for each object — is significantly less optimised on Apple Silicon than on NVIDIA GPUs with CUDA. This does not affect the quality of the trained weights or the validity of the metrics, only the wall-clock time needed to compute them. The process is running overnight and the table above will be updated when all ten epochs are complete.
 
-The purpose of this fine-tuning exercise is not to build a production-ready C-UAS system. It is to demonstrate the complete machine learning workflow in practice: identifying a domain gap between a pretrained model and the target environment, sourcing appropriate in-domain data, preparing and validating that data correctly, running a supervised training pipeline, and evaluating results against defined metrics. This is precisely the workflow described in KTP Associate duties 3 (dataset curation and annotation), 4 (model training and optimisation), and 5 (performance evaluation against operational benchmarks). The full training output — loss curves, label plots, and per-epoch metrics — is logged to [outputs/training/drone_finetune/](outputs/training/drone_finetune/). The best weights checkpoint is saved at [outputs/training/drone_finetune/weights/best.pt](outputs/training/drone_finetune/weights/best.pt).
+The purpose of this fine-tuning exercise is not to build a production-ready C-UAS system. It is to demonstrate the complete machine learning workflow in practice: identifying a domain gap between a pretrained model and the target environment, sourcing appropriate in-domain data, preparing and validating that data correctly, running a supervised training pipeline, and evaluating results against defined metrics. This is precisely the workflow described in KTP Associate duties 3 (dataset curation and annotation), 4 (model training and optimisation), and 5 (performance evaluation against operational benchmarks). The full training output — loss curves, label plots, and per-epoch metrics — is logged to `outputs/training/drone_finetune/`. The best weights checkpoint is saved at `outputs/training/drone_finetune/weights/best.pt`.
 
 When training completes the results table above will be updated with the final epoch metrics. The training curves plot will be available at [outputs/training/drone_finetune/results.png](outputs/training/drone_finetune/results.png). A FPS benchmark will then be run comparing the pretrained YOLOv8n baseline — which measured 35.49 FPS on this hardware — against the fine-tuned model, to quantify the accuracy versus inference-speed tradeoff that comes with domain-specific training.
 
@@ -79,9 +78,6 @@ When training completes the results table above will be updated with the final e
 
 ### Track Trajectories
 ![Trajectories](assets/trajectories.png)
-
-### Training Curves (Day 2)
-![Training](outputs/training/drone_finetune/results.png)
 
 ---
 
@@ -201,29 +197,3 @@ This PoC directly demonstrates competency in each technical area specified in th
 
 *University of Central Lancashire / Operational Solutions Ltd — KTP Associate Application, 2026*
 
----
-
-## How to Run
-
-### 1. Install dependencies
-```bash
-pip install -r requirements.txt
-```
-
-### 2. Add drone footage
-Place any `.mp4` file into `data/sample_clips/`
-
-### 3. Run detection and tracking
-```bash
-python src/detect_track.py --input data/sample_clips/drone_test.mp4 --output outputs/annotated_drone.mp4 --conf 0.3
-```
-
-### 4. Visualise trajectories
-```bash
-python src/visualise.py --input outputs/annotated_drone.mp4 --output outputs/trajectories.png
-```
-
-### 5. Explore dataset
-```bash
-jupyter notebook notebooks/exploration.ipynb
-```
