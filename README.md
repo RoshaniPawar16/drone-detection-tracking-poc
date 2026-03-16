@@ -47,6 +47,31 @@ Annotated Output Video   (Track ID + confidence overlaid on each frame)
 
 ---
 
+## Day 2: VisDrone Fine-Tuning
+
+VisDrone2019-DET-train is a large-scale benchmark dataset of images captured from drone-mounted cameras across a wide range of real-world conditions — different altitudes, lighting conditions, weather, and urban and rural environments. This matters because the pretrained YOLOv8n model was originally trained on COCO, a dataset of everyday objects photographed at ground level. Aerial footage looks fundamentally different: objects are tiny relative to the frame, the perspective is top-down rather than eye-level, and the density of objects per image is far higher. A car photographed from fifty metres above looks nothing like a car photographed from the pavement. Fine-tuning on VisDrone directly addresses that domain gap, teaching the model to recognise the visual signatures of pedestrians, vehicles, and other objects as seen from the air.
+
+500 images from the VisDrone training split were used for this fine-tuning run. VisDrone annotations are distributed in CSV format and had to be converted to YOLO format — normalised bounding box coordinates relative to image dimensions — before training could begin. During conversion, invalid bounding boxes were filtered out: specifically boxes with zero width or height, and boxes flagged by the original annotators as occluded or ignored. This filtering step matters because training on malformed or ambiguous labels actively degrades model performance, causing the model to learn noise rather than signal.
+
+Training is running across ten epochs on Apple MPS (the M2's GPU). mAP50 measures how accurately the model draws bounding boxes around objects, where a score of 1.0 would mean perfect detection on every frame. Validation classification loss measures how confidently the model assigns a class label to each detected object, where lower is better. Both metrics are improving with each epoch, confirming that the model is adapting to the aerial domain.
+
+| Epoch | mAP50   | Val Classification Loss |
+|-------|---------|------------------------|
+| 1     | 0.00798 | 4.13555                |
+| 2     | 0.00919 | 2.72348                |
+| 3     | 0.00954 | 2.41302                |
+| 4     | 0.01263 | 2.30352                |
+| 5     | 0.01638 | 2.08437                |
+| 6–10  | continuing… | continuing…        |
+
+Each validation epoch takes considerably longer than the training pass itself. This is a known bottleneck when running dense object detection on Apple MPS: the non-maximum suppression step — which filters overlapping detections and keeps only the best bounding box for each object — is significantly less optimised on Apple Silicon than on NVIDIA GPUs with CUDA. This does not affect the quality of the trained weights or the validity of the metrics, only the wall-clock time needed to compute them. The process is running overnight and the table above will be updated when all ten epochs are complete.
+
+The purpose of this fine-tuning exercise is not to build a production-ready C-UAS system. It is to demonstrate the complete machine learning workflow in practice: identifying a domain gap between a pretrained model and the target environment, sourcing appropriate in-domain data, preparing and validating that data correctly, running a supervised training pipeline, and evaluating results against defined metrics. This is precisely the workflow described in KTP Associate duties 3 (dataset curation and annotation), 4 (model training and optimisation), and 5 (performance evaluation against operational benchmarks). The full training output — loss curves, label plots, and per-epoch metrics — is logged to [outputs/training/drone_finetune/](outputs/training/drone_finetune/). The best weights checkpoint is saved at [outputs/training/drone_finetune/weights/best.pt](outputs/training/drone_finetune/weights/best.pt).
+
+When training completes the results table above will be updated with the final epoch metrics. The training curves plot will be available at [outputs/training/drone_finetune/results.png](outputs/training/drone_finetune/results.png). A FPS benchmark will then be run comparing the pretrained YOLOv8n baseline — which measured 35.49 FPS on this hardware — against the fine-tuned model, to quantify the accuracy versus inference-speed tradeoff that comes with domain-specific training.
+
+---
+
 ## Sample Outputs
 
 ### Annotated Detection and Tracking
