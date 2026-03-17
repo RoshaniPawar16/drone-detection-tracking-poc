@@ -215,3 +215,4 @@ outputs/
 .ipynb_checkpoints/
 yolov8n.pt
 *.pt
+data/sample_clips/frame_*.jpg
