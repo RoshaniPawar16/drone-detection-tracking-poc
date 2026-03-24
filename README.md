@@ -1,87 +1,52 @@
 # Drone Detection and Tracking — Proof of Concept
 
-> Built as part of a KTP Associate application to the University of Central Lancashire (UCLan) in partnership with Operational Solutions Ltd (OSL).
+A two-day PoC demonstrating a real-time object detection and tracking pipeline for Counter-UAS (C-UAS) applications, built as a portfolio piece for OSL.
 
 ---
 
-## Overview
+## The Problem
 
-Unmanned Aerial Systems (UAS) — commonly known as drones — present an increasingly complex threat to critical infrastructure, public safety, and restricted airspace. OSL develops Counter-UAS (C-UAS) solutions that detect, track, and classify drone threats using multimodal sensor arrays. This proof-of-concept (PoC) demonstrates the core machine learning pipeline required for such a system: real-time object detection and multi-object tracking applied to aerial video footage under diverse environmental conditions.
+OSL builds counter-unmanned aerial systems — technology that detects, tracks, and classifies drone threats using multimodal sensor arrays. The core challenge is hard: drones are small objects, often filmed from above, in varying lighting and backgrounds. A single frame might show a vehicle that looks like a dark smudge from fifty metres up. The density of objects per frame is high. Conditions change constantly.
 
-This PoC uses **YOLOv8** for deep-learning-based single-frame detection and **ByteTrack** for robust multi-frame association, running end-to-end in Python with PyTorch. It is designed to be extended toward a full C-UAS capability including thermal imaging, radar fusion, and 3D geolocation.
+A general-purpose pretrained model trained on everyday ground-level photography cannot reliably handle this. It was not taught to recognise objects from above. It will miss things, and it will fire on the wrong things. The question this PoC explores is how much domain-specific fine-tuning on aerial data closes that gap — even at small scale.
 
 ---
 
-## Pipeline
+## Approach
+
+YOLOv8 is a deep learning model that looks at one frame at a time and draws bounding boxes around objects it recognises. It is fast enough to run in real time and small enough to fit on edge hardware. ByteTrack connects those detections across frames, giving each object a persistent ID so you can follow a single target across the whole sequence — even when it briefly disappears or is partially occluded. Together they form a complete detect-and-track pipeline that makes sense for C-UAS: fast per-frame detection, stable cross-frame identity.
 
 ```
-Input Video
-    │
-    ▼
-Frame Extraction         (OpenCV — frame-by-frame decode)
-    │
-    ▼
-YOLOv8 Detection         (Ultralytics — per-frame bounding boxes + confidence)
-    │
-    ▼
-ByteTrack Tracking       (Supervision — cross-frame ID assignment)
-    │
-    ▼
-Classification           (Class label from YOLO head — extensible to fine-grained UAS type)
-    │
-    ▼
-Annotated Output Video   (Track ID + confidence overlaid on each frame)
+Input Video → Frame Extraction → YOLOv8 Detection → ByteTrack Tracking → Annotated Output
 ```
 
 ---
 
-## Results
+## What I Actually Built and Measured
 
-| Model                   | Precision                                      | Recall                                         | F1  | Avg FPS |
-|-------------------------|------------------------------------------------|------------------------------------------------|-----|---------|
-| YOLOv8n (pretrained)    | TBD — ground truth annotations required        | TBD — ground truth annotations required        | TBD | **35.49**   |
-| YOLOv8n fine-tuned (VisDrone, 9 epochs)    | TBD — ground truth annotations required | TBD — ground truth annotations required | TBD | **60.36**   |
+### Day 1 — Baseline Pipeline
 
-> Pretrained FPS measured over 9184 frames at 640×360. Fine-tuned FPS measured over 100 frames using `best.pt` (epoch 5 checkpoint, peak mAP50). Both on Apple M2 MPS. Precision and Recall require labelled ground-truth annotations — to be produced by `evaluate.py` once a UAS dataset is curated.
+Built `detect_track.py`: load a video, run YOLOv8n per frame, pass detections to ByteTrack, write an annotated output video with track IDs overlaid. Ran it on `drone_test.mp4`. Processed 9184 frames. Pretrained throughput: 35.49 FPS (note: measured before adding conf/max_det constraints — see Day 2 for matched comparison). 28 unique tracks assigned. This confirmed the pipeline worked end-to-end and that YOLOv8n could sustain well above the 30 FPS real-time threshold on Apple M2 MPS.
 
----
+### Day 2 — Domain Adaptation
 
-## Day 2: VisDrone Fine-Tuning
+COCO has 80 everyday object classes photographed at ground level. Aerial drone footage looks completely different. A car from above looks nothing like the cars COCO was trained on. Fine-tuning teaches the model to recognise these objects from a new perspective.
 
-VisDrone2019-DET-train is a large-scale benchmark dataset of images captured from drone-mounted cameras across a wide range of real-world conditions — different altitudes, lighting conditions, weather, and urban and rural environments. This matters because the pretrained YOLOv8n model was originally trained on COCO, a dataset of everyday objects photographed at ground level. Aerial footage looks fundamentally different: objects are tiny relative to the frame, the perspective is top-down rather than eye-level, and the density of objects per image is far higher. A car photographed from fifty metres above looks nothing like a car photographed from the pavement. Fine-tuning on VisDrone directly addresses that domain gap, teaching the model to recognise the visual signatures of pedestrians, vehicles, and other objects as seen from the air.
+Two experiments:
 
-500 images from the VisDrone training split were used for this fine-tuning run. VisDrone annotations are distributed in CSV format and had to be converted to YOLO format — normalised bounding box coordinates relative to image dimensions — before training could begin. During conversion, invalid bounding boxes were filtered out: specifically boxes with zero width or height, and boxes flagged by the original annotators as occluded or ignored. This filtering step matters because training on malformed or ambiguous labels actively degrades model performance, causing the model to learn noise rather than signal.
+**Experiment 1 — 500 VisDrone images, 9 epochs.** mAP50 peaked at 0.016 at epoch 5. Low, but the model was learning. The dataset was too small to generalise well.
 
-Training ran across ten epochs on Apple MPS. mAP50 measures how accurately the model draws bounding boxes around objects, where a score of 1.0 would mean perfect detection on every frame. Validation classification loss measures how confidently the model assigns a class label to each detected object, where lower is better. mAP50 peaked at epoch 5 and plateaued, while classification loss improved continuously — both are expected behaviours with a small 500-image dataset. The epoch 5 checkpoint was saved as `best.pt`.
+**Experiment 2 — 1000 VisDrone images, 15 epochs planned.** MPS training instability caused resume cycles that corrupted epochs 12–14 — those validation epochs returned zero metrics entirely. The best checkpoint was epoch 4, not the final epoch. This is an honest limitation. Training on a proper GPU without memory pressure would avoid it.
 
-| Epoch | mAP50   | Val Classification Loss |
-|-------|---------|------------------------|
-| 1     | 0.00798 | 4.13555                |
-| 2     | 0.00919 | 2.72348                |
-| 3     | 0.00954 | 2.41302                |
-| 4     | 0.01263 | 2.30352                |
-| 5     | 0.01638 | 2.08437                |
-| 6     | 0.01533 | 1.97599                |
-| 7     | 0.01531 | 1.91160                |
-| 8     | 0.01430 | 1.88136                |
-| 9     | 0.01433 | 1.84749                |
-| 10    | — (validation interrupted by OS memory pressure) | — |
+| Metric | Pretrained (COCO) | Fine-tuned (VisDrone 1k, epoch 4) |
+|---|---|---|
+| Training data | COCO 80 classes | VisDrone 1k — pedestrians, vehicles, aerial objects |
+| mAP50 (VisDrone val) | not evaluated | 0.0815 |
+| Inference FPS | 19.81 | 21.79 |
+| Avg detections/frame | 8.5 | 9.1 |
+| Inference params | conf=0.25, max_det=100 | conf=0.25, max_det=100 |
 
-Each validation epoch runs considerably slower than training on Apple MPS because the non-maximum suppression step — which filters overlapping detections and keeps only the best bounding box per object — is significantly less optimised on Apple Silicon than on NVIDIA GPUs with CUDA. This does not affect the quality of the weights, only the time taken to compute the metrics.
-
-The purpose of this fine-tuning exercise is not to build a production-ready C-UAS system. It is to demonstrate the complete machine learning workflow in practice: identifying a domain gap between a pretrained model and the target environment, sourcing appropriate in-domain data, preparing and validating that data correctly, running a supervised training pipeline, and evaluating results against defined metrics. This is precisely the workflow described in KTP Associate duties 3 (dataset curation and annotation), 4 (model training and optimisation), and 5 (performance evaluation against operational benchmarks). The full training output — loss curves, label plots, and per-epoch metrics — is logged to `outputs/training/drone_finetune/`. The best weights checkpoint is saved at `outputs/training/drone_finetune/weights/best.pt`.
-
-The FPS benchmark comparing pretrained versus fine-tuned models showed an interesting result: the fine-tuned model ran at 60.36 FPS versus the pretrained baseline at 35.49 FPS. The fine-tuned model is more selective — having learned which image regions are worth scrutinising — and produces fewer candidate detections per frame, which reduces the post-processing cost of NMS. This illustrates a real tradeoff in applied ML: domain-specific training can improve both accuracy on the target domain and inference speed simultaneously, at the cost of generalisation to other object categories.
-
----
-
-## Sample Outputs
-
-### Annotated Detection and Tracking
-![Sample Frame](assets/sample_frame.png)
-
-### Track Trajectories
-![Trajectories](assets/trajectories.png)
+mAP50=0.0815 is low in absolute terms. State-of-the-art models on VisDrone score 0.25 to 0.40. A YOLOv8n trained on 1000 images for 4 effective epochs is expected to score here. The point is not to beat state-of-the-art — it is to show the model is adapting to the aerial domain. The 5x improvement over the 500-image run (0.016 to 0.0815) confirms it is learning.
 
 ---
 
@@ -89,115 +54,83 @@ The FPS benchmark comparing pretrained versus fine-tuned models showed an intere
 
 ```
 drone-detection-tracking-poc/
-├── README.md
-├── requirements.txt
 ├── src/
-│   ├── detect_track.py     # Main detection + tracking pipeline
-│   ├── evaluate.py         # Precision / Recall / F1 / FPS evaluation
-│   └── visualise.py        # Trajectory visualisation and annotated replay
+│   ├── detect_track.py     — main pipeline: load video, detect, track, save output
+│   ├── evaluate.py         — compute precision, recall, F1, FPS against ground truth
+│   └── visualise.py        — plot track trajectories, replay annotated video
 ├── notebooks/
-│   └── exploration.ipynb   # Interactive dataset exploration and inference demo
-└── data/
-    └── .gitkeep            # Placeholder — populate with sample_clips/ before running
+│   └── exploration.ipynb   — visual walkthrough: load frames, run inference, show results
+├── assets/                 — images embedded in this README
+├── data/
+│   ├── visdrone.yaml       — dataset config for 500-image fine-tuning run
+│   └── visdrone1k.yaml     — dataset config for 1000-image fine-tuning run
+├── requirements.txt
+└── README.md
 ```
-
-Output files (videos, plots, CSVs) are written to `outputs/` which is created automatically at runtime.
 
 ---
 
-## Installation
+## Sample Outputs
 
-```bash
-# Python 3.9+ recommended
+![Sample Frame](assets/sample_frame.png)
+![Trajectories](assets/trajectories.png)
+![FPS Comparison](assets/fps_comparison.png)
+
+---
+
+## How to Run
+
+### Install
+```
 pip install -r requirements.txt
 ```
 
-CUDA (NVIDIA GPU), MPS (Apple Silicon), or CPU will be selected automatically.
-
----
-
-## Run Instructions
-
-### 1. Detection and Tracking
-
-```bash
+### Run detection and tracking
+```
 python src/detect_track.py \
-    --input  data/sample_clips/drone_flight.mp4 \
-    --output outputs/tracked_output.mp4 \
-    --conf   0.35 \
-    --show
+    --input data/sample_clips/your_video.mp4 \
+    --output outputs/tracked.mp4 \
+    --conf 0.25
 ```
 
-| Argument   | Description                                      | Default              |
-|------------|--------------------------------------------------|----------------------|
-| `--input`  | Path to input video file                         | required             |
-| `--output` | Path to save annotated output video              | `outputs/output.mp4` |
-| `--conf`   | Detection confidence threshold (0.0 – 1.0)       | `0.35`               |
-| `--show`   | Display live preview window during processing    | off                  |
+The script automatically uses the fine-tuned weights if available, otherwise falls back to pretrained YOLOv8n.
 
-### 2. Evaluation
-
-```bash
+### Evaluate against ground truth
+```
 python src/evaluate.py \
-    --gt_dir     data/ground_truth/ \
-    --pred_dir   outputs/predictions/ \
-    --fps        28.3
+    --gt_dir data/ground_truth/ \
+    --pred_dir outputs/predictions/
 ```
 
-Results are printed to the console and saved to `outputs/evaluation_results.csv`.
-
-### 3. Visualisation
-
-```bash
-python src/visualise.py \
-    --input  outputs/tracked_output.mp4 \
-    --output outputs/trajectory_plot.png
+### Explore interactively
 ```
-
-### 4. Notebook Exploration
-
-```bash
 jupyter notebook notebooks/exploration.ipynb
 ```
 
-Populate `data/sample_clips/` with `.jpg` or `.png` frames before running.
+---
+
+## Limitations and What Comes Next
+
+What this PoC does not do:
+- Thermal or depth camera input — only visible light
+- 3D geolocation — tracking is 2D in the image plane
+- Sensor fusion — no radar, RF, or acoustic integration
+- Edge deployment — not tested on Jetson or embedded hardware
+- The fine-tuning run was cut short by MPS memory issues — a GPU with more VRAM would allow longer training
+
+What the next steps would be in a real project:
+- Curate a UAS-specific dataset with drone classes (not VisDrone's vehicle-heavy distribution)
+- Fine-tune on thermal sequences — VisDrone has IR data we did not use
+- Run on a proper GPU for full 15-epoch training
+- Add a sensor fusion module connecting visible + thermal detections
+- Test real-time performance on target edge hardware
 
 ---
 
-## Limitations and Next Steps
+## Why This Matters for the KTP
 
-### Current Limitations
-- Detection operates on **visible-spectrum video only** — does not generalise to thermal (LWIR/MWIR) or depth imagery without retraining.
-- Tracking is **2D** (image plane); no 3D geolocation or bearing/elevation estimation.
-- Pretrained weights are trained on general object categories — UAS-specific fine-tuning on annotated drone datasets is required for operational precision.
-- No **sensor fusion**: radar, RF spectrum, acoustic, and electro-optical feeds are not yet combined.
-- Not yet validated for **real-time edge deployment** (e.g. Jetson Orin, Raspberry Pi 5).
-
-### Next Steps
-1. **Sensor fusion** — integrate thermal (LWIR) cameras, mmWave radar, and RF spectrum analysers to enable detection under occlusion, at night, and at long range.
-2. **Custom dataset curation** — collect and annotate a labelled UAS dataset covering multiple drone classes (multirotor, fixed-wing, micro-UAS), altitudes, lighting conditions, and backgrounds.
-3. **Model fine-tuning** — train YOLOv8 (and compare against RT-DETR, YOLOv9) on the curated dataset; apply data augmentation simulating fog, motion blur, and sun glare.
-4. **3D geolocation** — fuse stereo camera / LiDAR / radar returns to produce WGS-84 coordinate estimates for detected UAS.
-5. **Real-time edge deployment** — quantise and export models to TensorRT / ONNX for Jetson-class hardware; target >30 FPS at detection quality.
-6. **Classification granularity** — extend the YOLO classification head to distinguish drone make/model, predict intent, and flag threat level.
-7. **Continuous evaluation framework** — integrate automated metric tracking (mAP@0.5, MOTA, IDF1) against a held-out test set as part of a CI pipeline.
+The KTP requires someone who can take a research problem, break it into tractable pieces, measure results honestly, and document the thinking. This PoC covers exactly that: problem framing, data curation, model training, honest evaluation, and documented limitations. The tools are the same ones the KTP project would use. The workflow is the same one the KTP project would follow.
 
 ---
 
-## Relevance to KTP Objectives
-
-This PoC directly demonstrates competency in each technical area specified in the KTP Associate job description:
-
-| JD Requirement                                  | Demonstrated By                                      |
-|-------------------------------------------------|------------------------------------------------------|
-| Object detection and tracking of UAS            | `detect_track.py` — YOLOv8 + ByteTrack              |
-| Deep learning model design and training         | YOLOv8 architecture; fine-tuning workflow outlined   |
-| ML across diverse conditions                    | Confidence thresholding; augmentation roadmap        |
-| Dataset curation and performance evaluation     | `evaluate.py` — precision, recall, F1, FPS           |
-| Python, PyTorch, real-time feasibility          | Full PyTorch backend; FPS measurement                |
-| Technical documentation                         | This README, inline code comments, notebook          |
-
----
-
-*University of Central Lancashire / Operational Solutions Ltd — KTP Associate Application, 2026*
-
+*Built as part of a KTP Associate application to the University of Central Lancashire in partnership with Operational Solutions Ltd (OSL), 2026.*

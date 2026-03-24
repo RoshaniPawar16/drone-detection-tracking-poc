@@ -86,15 +86,19 @@ def parse_args() -> argparse.Namespace:
 
 def load_model(device: str) -> YOLO:
     """
-    Load YOLOv8n pretrained on COCO.
+    Load the fine-tuned VisDrone model if available, otherwise fall back to
+    pretrained YOLOv8n (COCO).
 
     For operational C-UAS use, this model should be fine-tuned on a labelled
     UAS dataset. The 'n' (nano) variant is selected here for real-time
     feasibility on edge hardware; 's' or 'm' variants offer higher accuracy
     at the cost of throughput.
     """
-    print("[Model] Loading YOLOv8n (pretrained COCO weights)...")
-    model = YOLO("yolov8n.pt")
+    model_path = 'runs/detect/outputs/training/drone_finetune_1k/weights/best.pt'
+    if not os.path.exists(model_path):
+        model_path = 'yolov8n.pt'
+    print(f'Loading model: {model_path}')
+    model = YOLO(model_path)
     model.to(device)
     print("[Model] Loaded successfully.")
     return model
